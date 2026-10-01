@@ -6,6 +6,7 @@
 
 Azure Key Vault · Provedor em memória · `Result` em vez de exceção · Cache · `IConfiguration` · Health check · OpenTelemetry · Native AOT
 
+[![CI](https://github.com/tudoemcodigo/lib-tec-cofre/actions/workflows/ci.yml/badge.svg)](https://github.com/tudoemcodigo/lib-tec-cofre/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![AOT](https://img.shields.io/badge/Native%20AOT-compat%C3%ADvel-512BD4)](#-native-aot-trimming-e-net-8)
 [![Versão](https://img.shields.io/badge/vers%C3%A3o-0.0.1-blue)](#)
