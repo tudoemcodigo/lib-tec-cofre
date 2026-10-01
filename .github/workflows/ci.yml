@@ -1,0 +1,363 @@
+name: CI / Publicação NuGet
+
+# Fluxo:
+#   pull_request na main  -> build + testes + cobertura (não publica, sem acesso ao cofre de testes)
+#   push na main          -> build + testes + integração (Key Vault de testes) + publica prévia X.Y.(Z+1)-preview.N
+#   release publicado     -> build + testes + publica versão estável da tag (vX.Y.Z -> X.Y.Z), só se o commit estiver na main
+#   workflow_call         -> chamado pelo release.yml com a versão digitada e publish: false
+#                            (só build, testes e pacotes; o release.yml cria a tag e então publica)
+#
+# Regras de segurança dos scripts:
+#   - nada de ${{ ... }} dentro de "run:" (valores chegam por "env:" e são usados entre aspas: "$VERSION");
+#   - o token OIDC (id-token: write) só existe no job de integração, que nunca roda em pull_request.
+#
+# Actions fixadas por SHA (o comentário traz a tag); o Dependabot atualiza SHA e comentário juntos.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Versão estável, ex.: 1.2.0"
+        type: string
+        required: true
+      publish:
+        description: "Publicar no GitHub Packages ao final (o release.yml usa false e publica depois de criar a tag)"
+        type: boolean
+        required: false
+        default: true
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  PROJECT: TEC.Cofre/TEC.Cofre.csproj
+  SOLUTION: TEC.Cofre.slnx
+  NUGET_FEED: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+
+jobs:
+  build:
+    name: Build, testes e pacote
+    runs-on: ubuntu-24.04
+    # Roda também em pull_request: sem id-token (o login OIDC no cofre de testes fica no job "integration")
+    permissions:
+      contents: read
+      packages: read   # restore do TEC.Core no feed interno (GitHub Packages)
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # histórico e tags para calcular a versão, conferir a main e para o SourceLink
+          persist-credentials: false   # nenhum passo faz push; o token não fica gravado no .git/config
+
+      # Release criado à mão (evento "release"): a tag pode apontar para qualquer commit, inclusive de uma branch não
+      # revisada. Só publica versão estável de commit que já está na main.
+      - name: Conferir que o commit do Release está na main
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # O checkout não persiste credenciais: o token vai só neste comando
+          AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          git -c "http.https://github.com/.extraheader=$AUTH" fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::O commit do Release ($GITHUB_SHA) não está na main. Publique versões estáveis só a partir da main."
+            exit 1
+          fi
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json   # SDK fixado no global.json (mesmo do desenvolvimento local)
+          # Runtime do .NET 8 (LTS) para rodar os testes do alvo net8.0; o build continua com o SDK do global.json
+          dotnet-version: 8.0.x
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+
+      # O nuget.config do repositório só tem o packageSourceMapping (TEC.* -> tec-interno, * -> nuget.org).
+      # As origens, com esses nomes exatos, são definidas aqui no NuGet.Config do usuário do runner.
+      - name: Configurar origens NuGet
+        shell: bash
+        env:
+          NUGET_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          CONFIG="$HOME/.nuget/NuGet/NuGet.Config"
+          mkdir -p "$(dirname "$CONFIG")"
+          if [ ! -f "$CONFIG" ]; then
+            printf '<?xml version="1.0" encoding="utf-8"?>\n<configuration />\n' > "$CONFIG"
+          fi
+
+          dotnet nuget remove source nuget.org --configfile "$CONFIG" >/dev/null 2>&1 || true
+          dotnet nuget remove source tec-interno --configfile "$CONFIG" >/dev/null 2>&1 || true
+
+          dotnet nuget add source "https://api.nuget.org/v3/index.json" --name nuget.org --configfile "$CONFIG"
+          dotnet nuget add source "$NUGET_FEED" --name tec-interno \
+            --username "$GITHUB_ACTOR" --password "$NUGET_TOKEN" \
+            --store-password-in-clear-text --configfile "$CONFIG"
+
+      - name: Calcular versão
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          SEMVER='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+          STABLE_TAG='^v[0-9]+\.[0-9]+\.[0-9]+$'
+
+          if [ -n "${INPUT_VERSION:-}" ]; then
+            VERSION="$INPUT_VERSION"
+            ORIGIN="A versão informada"
+          elif [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            ORIGIN="A tag do Release (esperado vX.Y.Z)"
+          else
+            # Última tag estável (ignora pré-releases como v1.2.0-rc.1)
+            LAST_TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' 2>/dev/null || true)
+            if [ -n "$LAST_TAG" ]; then
+              # --match é um glob (aceitaria "v1.2.3x"): a tag é conferida ANTES de entrar na conta abaixo, porque a
+              # expansão aritmética do bash avalia o conteúdo das variáveis
+              if ! [[ "$LAST_TAG" =~ $STABLE_TAG ]]; then
+                echo "::error::A última tag estável encontrada não segue o padrão vX.Y.Z; corrija ou apague a tag."
+                exit 1
+              fi
+              IFS='.' read -r MAJOR MINOR PATCH <<< "${LAST_TAG#v}"
+              BASE="$MAJOR.$MINOR.$((10#$PATCH + 1))"
+            else
+              # Sem tags ainda: usa o <Version> do csproj como base
+              BASE=$(dotnet msbuild "$PROJECT" -getProperty:Version)
+            fi
+            VERSION="$BASE-preview.$GITHUB_RUN_NUMBER"
+            ORIGIN="A versão de prévia calculada"
+          fi
+
+          # Todos os ramos passam pela mesma conferência: a versão vai para a linha de comando do build e do pack
+          if ! [[ "$VERSION" =~ $SEMVER ]]; then
+            echo "::error::$ORIGIN não segue o padrão X.Y.Z (SemVer): '${VERSION//[^0-9A-Za-z.+-]/?}'."
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "### 📦 Versão: \`$VERSION\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore (lock file obrigatório)
+        run: dotnet restore "$SOLUTION" --locked-mode
+
+      - name: Build
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: dotnet build "$SOLUTION" -c Release --no-restore "-p:Version=$VERSION"
+
+      # Roda os testes em net8.0 e net10.0 (TargetFrameworks do projeto de testes), sem acesso ao cofre:
+      # a integração com o Key Vault de testes fica no job "integration" (só na main).
+      # O .trx usa o nome padrão (único por execução): um nome fixo faria o net10.0 sobrescrever o net8.0.
+      - name: Testes + cobertura
+        env:
+          TEC_COFRE_INTEGRACAO: 0
+        run: >
+          dotnet test --solution "$SOLUTION" -c Release --no-build
+          --coverage --coverage-output-format cobertura
+          --results-directory ./coverage
+          --report-trx
+
+      - name: Testes sem ICU (InvariantGlobalization)
+        env:
+          DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: 1
+          TEC_COFRE_INTEGRACAO: 0
+        run: dotnet test --solution "$SOLUTION" -c Release --no-build
+
+      # Só com cobertura gerada: se o restore, o build ou os testes falharem antes, o erro exibido é o deles
+      - name: Relatório de cobertura
+        if: ${{ !cancelled() && hashFiles('coverage/*.cobertura.xml') != '' }}
+        uses: danielpalme/ReportGenerator-GitHub-Action@c31aa4ed4f12f147061186cf2a029f307b5c3636 # v5.5.9
+        with:
+          reports: coverage/*.cobertura.xml
+          targetdir: coverage-report
+          reporttypes: HtmlInline;MarkdownSummaryGithub
+          title: TEC.Cofre
+
+      - name: Publicar resumo da cobertura
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          if [ -f coverage-report/SummaryGithub.md ]; then
+            cat coverage-report/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload cobertura e resultados de teste
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cobertura
+          path: |
+            coverage-report/
+            coverage/**/*.trx
+          retention-days: 14
+
+      - name: Pack
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: dotnet pack "$SOLUTION" -c Release --no-build "-p:Version=$VERSION" -o ./artifacts
+
+      - name: Upload pacotes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nuget
+          path: artifacts/*
+          retention-days: 14
+
+  # Testes de integração contra o Key Vault de testes: só com OIDC configurado e só na main, NUNCA em pull_request.
+  # É o único job com id-token: write: código de PR não consegue pedir token OIDC, nem que um passo seja alterado.
+  # A credencial federada do Entra ID aceita exatamente o subject "repo:<owner>/<repo>:ref:refs/heads/main";
+  # PRs (refs/pull/...) e releases por tag (refs/tags/...) não recebem acesso ao cofre e pulam a integração.
+  # Com as variáveis definidas, falha no login quebra o job (configuração errada não passa despercebida).
+  integration:
+    name: Integração (Key Vault de testes)
+    needs: build
+    if: vars.AZURE_CLIENT_ID != '' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read   # restore do TEC.Core no feed interno (GitHub Packages)
+      id-token: write  # login OIDC no Azure (sem segredo armazenado)
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false   # nenhum passo usa as credenciais git
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+          dotnet-version: 8.0.x
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+
+      - name: Configurar origens NuGet
+        shell: bash
+        env:
+          NUGET_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          CONFIG="$HOME/.nuget/NuGet/NuGet.Config"
+          mkdir -p "$(dirname "$CONFIG")"
+          if [ ! -f "$CONFIG" ]; then
+            printf '<?xml version="1.0" encoding="utf-8"?>\n<configuration />\n' > "$CONFIG"
+          fi
+
+          dotnet nuget remove source nuget.org --configfile "$CONFIG" >/dev/null 2>&1 || true
+          dotnet nuget remove source tec-interno --configfile "$CONFIG" >/dev/null 2>&1 || true
+
+          dotnet nuget add source "https://api.nuget.org/v3/index.json" --name nuget.org --configfile "$CONFIG"
+          dotnet nuget add source "$NUGET_FEED" --name tec-interno \
+            --username "$GITHUB_ACTOR" --password "$NUGET_TOKEN" \
+            --store-password-in-clear-text --configfile "$CONFIG"
+
+      - name: Restore (lock file obrigatório)
+        run: dotnet restore "$SOLUTION" --locked-mode
+
+      - name: Build
+        run: dotnet build "$SOLUTION" -c Release --no-restore
+
+      - name: Login no Azure (OIDC)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      # Só os testes de integração (namespace TEC.Cofre.Tests.Integration), nos dois alvos; os demais já rodaram no job "build"
+      - name: Testes de integração
+        env:
+          TEC_COFRE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+        run: >
+          dotnet test --solution "$SOLUTION" -c Release --no-build
+          --treenode-filter "/*/TEC.Cofre.Tests.Integration/*/*"
+          --results-directory ./integration
+          --report-trx
+
+      - name: Upload resultados da integração
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: integracao
+          path: integration/**/*.trx
+          retention-days: 14
+
+  publish:
+    name: Publicar no GitHub Packages
+    # Depende dos testes (build) e da integração. A integração pode ser pulada (sem OIDC configurado, ou Release por
+    # tag): "skipped" não bloqueia a publicação, mas falha ou cancelamento bloqueiam. Sem o always(), um "needs" pulado
+    # pularia este job também.
+    needs: [build, integration]
+    if: >
+      always() &&
+      needs.build.result == 'success' &&
+      (needs.integration.result == 'success' || needs.integration.result == 'skipped') &&
+      ((inputs.version != '' && inputs.publish) ||
+       github.event_name == 'release' ||
+       (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write   # push no feed NuGet do GitHub
+      contents: write   # anexar os pacotes ao Release
+
+    steps:
+      - name: Download pacotes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nuget
+          path: artifacts
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      # O GitHub Packages não aceita .snupkg; os símbolos vão anexados ao Release.
+      # Sem --skip-duplicate: publicar uma versão que já existe falha visivelmente (uma reexecução não passa
+      # como "publicado" sem ter publicado nada).
+      - name: Push no GitHub Packages
+        env:
+          NUGET_API_KEY: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          dotnet nuget push "artifacts/*.nupkg"
+          --source "$NUGET_FEED"
+          --api-key "$NUGET_API_KEY"
+          --no-symbols
+
+      - name: Anexar pacotes ao Release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" artifacts/*.nupkg artifacts/*.snupkg --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Resumo
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          echo "### ✅ TEC.Cofre \`$VERSION\` publicado" >> "$GITHUB_STEP_SUMMARY"
+          echo "Feed: \`$NUGET_FEED\`" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,93 @@
+<Project>
+
+  <!--
+    Configurações compartilhadas pelos projetos da solução.
+    Os pacotes (TEC.Cofre, TEC.Cofre.AzureKeyVault e TEC.Cofre.InMemory) herdam as regras de segurança e os metadados NuGet;
+    os projetos *.Tests ficam de fora.
+  -->
+
+  <PropertyGroup>
+    <!-- .NET 8 (LTS) e .NET 10 (LTS); os testes rodam nos dois runtimes -->
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <IsTecPackage Condition="!$(MSBuildProjectName.EndsWith('.Tests'))">true</IsTecPackage>
+  </PropertyGroup>
+
+  <!-- Cadeia de suprimentos: vale para TODOS os projetos, inclusive testes (o build de testes também executa código de terceiros) -->
+  <PropertyGroup>
+    <!-- Auditoria de vulnerabilidades conhecidas em pacotes (inclusive transitivos); vulnerabilidade quebra o build -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+    <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
+    <!-- Lock file: garante que o restore use exatamente as mesmas versões (evita troca silenciosa de dependências) -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+
+  <!--
+    TEC.Core local: por enquanto, se o repositório do TEC.Core estiver na pasta vizinha (..\TEC.Core), usa referência
+    de projeto (código-fonte local, net8.0 e net10.0). Sem a pasta (ex.: CI), usa o pacote TEC.Core do feed interno.
+    Em ambos os casos o .nupkg declara dependência do pacote TEC.Core.
+    Forçar o pacote localmente: dotnet build -p:UseLocalTecCore=false
+    No modo local o lock file vai para packages.local.lock.json (ignorado pelo git), preservando o packages.lock.json
+    versionado, que é o do modo pacote.
+  -->
+  <PropertyGroup>
+    <TecCoreProjectPath>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\TEC.Core\TEC.Core\TEC.Core.csproj'))</TecCoreProjectPath>
+    <UseLocalTecCore Condition="'$(UseLocalTecCore)' == '' and Exists('$(TecCoreProjectPath)')">true</UseLocalTecCore>
+    <NuGetLockFilePath Condition="'$(UseLocalTecCore)' == 'true'">packages.local.lock.json</NuGetLockFilePath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(IsTecPackage)' == 'true'">
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <!-- Segurança da cadeia de build (mesmo padrão do TEC.Core) -->
+  <PropertyGroup Condition="'$(IsTecPackage)' == 'true'">
+    <!-- Analisadores do .NET com todas as regras de segurança (CA2xxx/CA3xxx/CA5xxx) tratadas como erro -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisModeSecurity>All</AnalysisModeSecurity>
+    <WarningsAsErrors>$(WarningsAsErrors);nullable;CA2100;CA2300;CA2301;CA2302;CA2305;CA2311;CA2315;CA2321;CA2326;CA2327;CA2328;CA2329;CA2330;CA3001;CA3002;CA3003;CA3004;CA3006;CA3007;CA3008;CA3009;CA3010;CA3011;CA3012;CA3061;CA3075;CA3076;CA3077;CA3147;CA5350;CA5351;CA5358;CA5359;CA5360;CA5363;CA5364;CA5365;CA5369;CA5370;CA5373;CA5379;CA5384;CA5385;CA5394;CA5397;CA5398</WarningsAsErrors>
+    <!-- Build reproduzível e rastreável até o código-fonte -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true' or '$(TF_BUILD)' == 'true'">true</ContinuousIntegrationBuild>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+  </PropertyGroup>
+
+  <!--
+    Native AOT e trimming: habilita os analisadores (IL2xxx/IL3xxx) e trata todos os avisos deles como erro.
+    Um pacote pode desligar com IsAotCompatible=false no próprio csproj, com a justificativa documentada.
+  -->
+  <PropertyGroup Condition="'$(IsTecPackage)' == 'true'">
+    <IsAotCompatible Condition="'$(IsAotCompatible)' == ''">true</IsAotCompatible>
+    <WarningsAsErrors>$(WarningsAsErrors);IL2001;IL2002;IL2003;IL2004;IL2005;IL2006;IL2007;IL2008;IL2009;IL2010;IL2011;IL2012;IL2013;IL2014;IL2015;IL2016;IL2017;IL2018;IL2019;IL2020;IL2021;IL2022;IL2023;IL2024;IL2025;IL2026;IL2027;IL2028;IL2029;IL2030;IL2031;IL2032;IL2033;IL2034;IL2035;IL2036;IL2037;IL2038;IL2039;IL2040;IL2041;IL2042;IL2043;IL2044;IL2045;IL2046;IL2048;IL2049;IL2050;IL2051;IL2052;IL2053;IL2054;IL2055;IL2056;IL2057;IL2058;IL2059;IL2060;IL2061;IL2062;IL2063;IL2064;IL2065;IL2066;IL2067;IL2068;IL2069;IL2070;IL2071;IL2072;IL2073;IL2074;IL2075;IL2076;IL2077;IL2078;IL2079;IL2080;IL2081;IL2082;IL2083;IL2084;IL2085;IL2086;IL2087;IL2088;IL2089;IL2090;IL2091;IL2092;IL2093;IL2094;IL2095;IL2096;IL2097;IL2098;IL2099;IL2100;IL2101;IL2102;IL2103;IL2104;IL2105;IL2106;IL2107;IL2108;IL2109;IL2110;IL2111;IL2112;IL2113;IL2114;IL2115;IL2116;IL2117;IL2118;IL2119;IL2120;IL2121;IL2122;IL2123;IL3050;IL3051;IL3052;IL3053;IL3054;IL3055;IL3056;IL3057;IL3058</WarningsAsErrors>
+    <!-- Valida a consistência da API do pacote entre os TFMs no dotnet pack (sem baseline: a 0.0.1 é a primeira publicação) -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
+  <!-- Metadados comuns do pacote NuGet (feed interno) -->
+  <PropertyGroup Condition="'$(IsTecPackage)' == 'true'">
+    <Authors>Roberto Oliveira</Authors>
+    <Company>Tudo em Código</Company>
+    <Copyright>Copyright © Tudo em Código</Copyright>
+    <PackageProjectUrl>https://www.tudoemcodigo.com</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/tudoemcodigo/lib-tec-cofre</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <PackageIcon>Logo.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsTecPackage)' == 'true'">
+    <InternalsVisibleTo Include="TEC.Cofre.Tests" />
+    <None Include="$(MSBuildThisFileDirectory)Images\Logo.png" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+</Project>

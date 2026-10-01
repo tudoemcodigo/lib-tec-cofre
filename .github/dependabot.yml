@@ -1,0 +1,46 @@
+version: 2
+
+# O TEC.Core vem do feed interno (GitHub Packages). O Dependabot não usa o GITHUB_TOKEN, e o GitHub Packages exige autenticação mesmo para pacotes públicos:
+# crie um PAT (classic) com escopo read:packages e salve-o como secret do Dependabot com o nome PACKAGES_READ_TOKEN
+# (Settings -> Secrets and variables -> Dependabot).
+registries:
+  nuget-org:
+    type: nuget-feed
+    url: https://api.nuget.org/v3/index.json
+  tec-interno:
+    type: nuget-feed
+    url: https://nuget.pkg.github.com/tudoemcodigo/index.json
+    token: ${{secrets.PACKAGES_READ_TOKEN}}
+
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    registries:
+      - nuget-org
+      - tec-interno
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    groups:
+      tec:
+        patterns: ["TEC.*"]
+      azure:
+        patterns: ["Azure.*"]
+      microsoft-extensions:
+        patterns: ["Microsoft.Extensions.*"]
+      testes:
+        patterns: ["TUnit*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]

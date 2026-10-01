@@ -1,0 +1,17 @@
+# Fim de linha: LF no repositório e na cópia de trabalho (os arquivos já estão em LF no índice).
+# Ao adotar este arquivo NÃO foi feito "git add --renormalize": nada muda até o próximo commit que tocar cada arquivo.
+* text=auto eol=lf
+
+# Scripts do Windows exigem CRLF
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binários
+*.png binary
+*.jpg binary
+*.ico binary
+*.pfx binary
+*.snk binary
+*.nupkg binary
+*.snupkg binary

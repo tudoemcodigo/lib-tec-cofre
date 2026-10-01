@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="TEC.Cofre.AzureKeyVault/TEC.Cofre.AzureKeyVault.csproj" />
+  <Project Path="TEC.Cofre.InMemory/TEC.Cofre.InMemory.csproj" />
+  <Project Path="TEC.Cofre.Tests/TEC.Cofre.Tests.csproj" />
+  <Project Path="TEC.Cofre/TEC.Cofre.csproj" />
+</Solution>

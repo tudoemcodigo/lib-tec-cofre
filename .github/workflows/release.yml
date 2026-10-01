@@ -1,0 +1,168 @@
+name: Publicar versão
+
+# Uso: Actions -> "Publicar versão" -> Run workflow -> digite a versão (ex.: 1.0.0) -> Run.
+#   1. validar  : valida a versão e verifica se a tag ainda não existe
+#   2. testar   : roda o ci.yml (build, testes e pacotes) SEM publicar
+#   3. tag      : cria a tag vX.Y.Z no commit testado (falha se já existir: duas execuções não publicam a mesma versão)
+#   4. publicar : envia os pacotes ao GitHub Packages (sem --skip-duplicate: versão já existente falha visivelmente)
+#   5. release  : cria o Release com notas automáticas e os pacotes anexados
+#
+# Ordem: a tag é criada ANTES da publicação, então todo pacote publicado tem tag correspondente. Se a publicação
+# falhar, a tag fica criada sem pacote: use "Re-run failed jobs" (a tag não é recriada; o push é refeito) ou apague
+# a tag para recomeçar do zero.
+#
+# Tag e Release criados com GITHUB_TOKEN não disparam outros workflows: não há publicação em duplicidade pelo
+# evento "release" do ci.yml.
+#
+# Actions fixadas por SHA (o comentário traz a tag); o Dependabot atualiza SHA e comentário juntos.
+on:
+  workflow_dispatch:
+    inputs:
+      versao:
+        description: "Versão (ex.: 1.0.0 ou 1.1.0-rc.1)"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publicar-versao
+  cancel-in-progress: false
+
+env:
+  NUGET_FEED: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+
+jobs:
+  validar:
+    name: Validar versão
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.validar.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # tags, para conferir se a versão já existe
+          persist-credentials: false   # a tag é criada pela API no job "tag" (GH_TOKEN), não por git push
+
+      - name: Validar
+        id: validar
+        shell: bash
+        env:
+          VERSAO: ${{ inputs.versao }}
+        run: |
+          set -euo pipefail
+          VERSION="${VERSAO#v}"
+
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Execute a partir da main (atual: $GITHUB_REF_NAME)."
+            exit 1
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::A versão '$VERSAO' não segue o padrão X.Y.Z (ex.: 1.0.0)."
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::A tag v$VERSION já existe."
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  testar:
+    name: Build, testes e pacotes
+    needs: validar
+    uses: ./.github/workflows/ci.yml
+    with:
+      version: ${{ needs.validar.outputs.version }}
+      publish: false
+    # Teto de permissões do ci.yml: o GitHub valida o máximo declarado pelos jobs chamados (inclusive o "publish",
+    # que aqui é pulado). Cada job do ci.yml continua recebendo só o que declara (o build: contents/packages read;
+    # só o job "integration" recebe id-token).
+    permissions:
+      contents: write
+      packages: write
+      id-token: write   # login OIDC no Azure para o job de integração do ci.yml
+
+  tag:
+    name: Criar tag
+    needs: [validar, testar]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      # Falha se a tag já existir (ex.: outra execução da mesma versão): nada é publicado em duplicidade
+      - name: Criar tag no commit testado
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.validar.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/v$VERSION" -f sha="$GITHUB_SHA"
+          echo "Tag v$VERSION criada em $GITHUB_SHA."
+
+  publicar:
+    name: Publicar no GitHub Packages
+    needs: [validar, tag]
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+
+    steps:
+      - name: Download pacotes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nuget
+          path: artifacts
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      # Sem --skip-duplicate: se a versão já existir no feed, o job falha em vez de "passar" sem publicar
+      - name: Push no GitHub Packages
+        env:
+          NUGET_API_KEY: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          dotnet nuget push "artifacts/*.nupkg"
+          --source "$NUGET_FEED"
+          --api-key "$NUGET_API_KEY"
+          --no-symbols
+
+  release:
+    name: Criar Release
+    needs: [validar, publicar]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download pacotes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nuget
+          path: artifacts
+
+      - name: Criar Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.validar.outputs.version }}
+        run: |
+          set -euo pipefail
+          PRERELEASE=""
+          if [[ "$VERSION" == *-* ]]; then PRERELEASE="--prerelease"; fi
+
+          # A tag já existe (job "tag"): --verify-tag impede que o gh crie outra
+          gh release create "v$VERSION" artifacts/*.nupkg artifacts/*.snupkg \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "v$VERSION" \
+            --generate-notes \
+            $PRERELEASE
+
+          echo "### ✅ TEC.Cofre [v$VERSION]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/v$VERSION) publicado" >> "$GITHUB_STEP_SUMMARY"
+          echo "Feed: \`$NUGET_FEED\`" >> "$GITHUB_STEP_SUMMARY"

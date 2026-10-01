@@ -1,0 +1,90 @@
+name: CodeQL
+
+# Análise estática de segurança do código C# (GitHub code scanning). Resultados em Security -> Code scanning.
+# Roda em pull requests e pushes na main e semanalmente (novas consultas encontram problemas em código antigo).
+# Build manual: a solução precisa do TEC.Core do feed interno, então as origens NuGet são configuradas como no ci.yml.
+#
+# Actions fixadas por SHA (o comentário traz a tag); o Dependabot atualiza SHA e comentário juntos.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '23 6 * * 1'   # segunda-feira, 06:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  SOLUTION: TEC.Cofre.slnx
+  NUGET_FEED: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+
+jobs:
+  analyze:
+    name: Analisar C#
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read          # restore do TEC.Core no feed interno
+      security-events: write  # envio dos resultados para o code scanning
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false   # nenhum passo usa as credenciais git
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json   # mesmo SDK do CI e do desenvolvimento local (compila net8.0 e net10.0)
+
+      - name: Configurar origens NuGet
+        shell: bash
+        env:
+          NUGET_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          CONFIG="$HOME/.nuget/NuGet/NuGet.Config"
+          mkdir -p "$(dirname "$CONFIG")"
+          if [ ! -f "$CONFIG" ]; then
+            printf '<?xml version="1.0" encoding="utf-8"?>\n<configuration />\n' > "$CONFIG"
+          fi
+
+          dotnet nuget remove source nuget.org --configfile "$CONFIG" >/dev/null 2>&1 || true
+          dotnet nuget remove source tec-interno --configfile "$CONFIG" >/dev/null 2>&1 || true
+
+          dotnet nuget add source "https://api.nuget.org/v3/index.json" --name nuget.org --configfile "$CONFIG"
+          dotnet nuget add source "$NUGET_FEED" --name tec-interno \
+            --username "$GITHUB_ACTOR" --password "$NUGET_TOKEN" \
+            --store-password-in-clear-text --configfile "$CONFIG"
+
+      - name: Inicializar CodeQL
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: csharp
+          build-mode: manual
+          queries: security-and-quality
+
+      - name: Build
+        run: |
+          dotnet restore "$SOLUTION" --locked-mode
+          dotnet build "$SOLUTION" -c Release --no-restore
+
+      - name: Analisar
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          category: /language:csharp

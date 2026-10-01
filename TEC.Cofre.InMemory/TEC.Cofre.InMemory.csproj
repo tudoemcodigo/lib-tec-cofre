@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Configurações de build, segurança e metadados comuns: ..\Directory.Build.props -->
+
+  <PropertyGroup>
+    <RootNamespace>TEC.Cofre.InMemory</RootNamespace>
+    <PackageId>TEC.Cofre.InMemory</PackageId>
+    <Version>0.0.1</Version>
+    <Description>Provedor em memória do TEC.Cofre para desenvolvimento local e testes automatizados: segredos, chaves (RSA/EC, criptografia e assinatura reais) e certificados autoassinados, com as mesmas validações, auditoria e métricas dos provedores reais. Bloqueado fora do ambiente Development por padrão; nunca use em produção.</Description>
+    <PackageTags>vault;secrets;cofre;testing;development;in-memory;tec</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TEC.Cofre\TEC.Cofre.csproj" />
+  </ItemGroup>
+
+</Project>
