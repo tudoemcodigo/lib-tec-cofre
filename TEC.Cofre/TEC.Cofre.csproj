@@ -15,9 +15,9 @@
   </ItemGroup>
 
   <!--
-    TEC.Core: por enquanto vem do código-fonte local (..\..\TEC.Core) quando a pasta existe; senão, do feed interno
-    (ver ..\nuget.config: packageSourceMapping garante que TEC.* nunca seja baixado do nuget.org). Regra em
-    ..\Directory.Build.props (UseLocalTecCore).
+    TEC.Core: sempre o pacote do feed interno (ver ..\nuget.config: packageSourceMapping garante que TEC.* nunca seja
+    baixado do nuget.org). Por enquanto uma prévia, até a 0.0.1 estável ser publicada; uma única referência, sem condição
+    (duas referências ao mesmo pacote geram NU1504 e deixam o lock file inconsistente).
     Este pacote NÃO depende de SDK de nuvem: cada provedor fica no seu próprio pacote.
   -->
   <ItemGroup>
@@ -27,9 +27,6 @@
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
     <PackageReference Include="TEC.Core" Version="0.0.1-preview.5" />
-  </ItemGroup>
-  <ItemGroup Condition="'$(UseLocalTecCore)' != 'true'">
-    <PackageReference Include="TEC.Core" Version="0.0.1" />
   </ItemGroup>
 
 </Project>

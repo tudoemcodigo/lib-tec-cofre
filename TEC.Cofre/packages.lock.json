@@ -58,6 +58,15 @@
         "resolved": "10.0.12",
         "contentHash": "xi+BDjFpW+Sb+MHFHaH6Y/gV9I8BluFwRXc1QyCdoZbIK26eNiBeFuMTe/FMwc33G1wdHCyDg7CVTmb8OdQrMQ=="
       },
+      "TEC.Core": {
+        "type": "Direct",
+        "requested": "[0.0.1-preview.5, )",
+        "resolved": "0.0.1-preview.5",
+        "contentHash": "N0bLLKVYbOgzAJ+3/Iw/VSGXnfRyzOWvEwOyInNKboVRReRzXv38FIPzzM3AVwXCmLmilUMXF4n+cE8iRj68rA==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.12"
+        }
+      },
       "Microsoft.Extensions.Caching.Abstractions": {
         "type": "Transitive",
         "resolved": "10.0.12",
@@ -181,6 +190,15 @@
         "requested": "[8.0.31, )",
         "resolved": "8.0.31",
         "contentHash": "OJdAGATV2QoVWL11zlDLEluA06q8rK+cgZR47ohrO8V+Qj5z9dlvN7bG9/0e5t0IOe+yD8tREC0bpsEgDGrzIQ=="
+      },
+      "TEC.Core": {
+        "type": "Direct",
+        "requested": "[0.0.1-preview.5, )",
+        "resolved": "0.0.1-preview.5",
+        "contentHash": "N0bLLKVYbOgzAJ+3/Iw/VSGXnfRyzOWvEwOyInNKboVRReRzXv38FIPzzM3AVwXCmLmilUMXF4n+cE8iRj68rA==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.12"
+        }
       },
       "Microsoft.Bcl.AsyncInterfaces": {
         "type": "Transitive",

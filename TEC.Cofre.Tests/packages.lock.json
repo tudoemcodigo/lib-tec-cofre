@@ -304,8 +304,8 @@
       },
       "TEC.Core": {
         "type": "Transitive",
-        "resolved": "0.0.1",
-        "contentHash": "iqvhoVbDDSvotKgVY1pOdQhbxZVhM/gqmq5Egdzadlwi1A4D4RE1N1gDmeFrxuYpcxrYaRLmJJ9LOWMGz29bEw==",
+        "resolved": "0.0.1-preview.5",
+        "contentHash": "N0bLLKVYbOgzAJ+3/Iw/VSGXnfRyzOWvEwOyInNKboVRReRzXv38FIPzzM3AVwXCmLmilUMXF4n+cE8iRj68rA==",
         "dependencies": {
           "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.12"
         }
@@ -339,7 +339,7 @@
           "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.12, )",
           "Microsoft.Extensions.Diagnostics.HealthChecks": "[10.0.12, )",
           "Microsoft.Extensions.Logging.Abstractions": "[10.0.12, )",
-          "TEC.Core": "[0.0.1, )"
+          "TEC.Core": "[0.0.1-preview.5, )"
         }
       },
       "tec.cofre.azurekeyvault": {
@@ -711,8 +711,8 @@
       },
       "TEC.Core": {
         "type": "Transitive",
-        "resolved": "0.0.1",
-        "contentHash": "iqvhoVbDDSvotKgVY1pOdQhbxZVhM/gqmq5Egdzadlwi1A4D4RE1N1gDmeFrxuYpcxrYaRLmJJ9LOWMGz29bEw==",
+        "resolved": "0.0.1-preview.5",
+        "contentHash": "N0bLLKVYbOgzAJ+3/Iw/VSGXnfRyzOWvEwOyInNKboVRReRzXv38FIPzzM3AVwXCmLmilUMXF4n+cE8iRj68rA==",
         "dependencies": {
           "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.12"
         }
@@ -747,7 +747,7 @@
           "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.12, )",
           "Microsoft.Extensions.Diagnostics.HealthChecks": "[10.0.12, )",
           "Microsoft.Extensions.Logging.Abstractions": "[10.0.12, )",
-          "TEC.Core": "[0.0.1, )"
+          "TEC.Core": "[0.0.1-preview.5, )"
         }
       },
       "tec.cofre.azurekeyvault": {
