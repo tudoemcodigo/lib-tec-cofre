@@ -26,9 +26,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
-  </ItemGroup>
-  <ItemGroup Condition="'$(UseLocalTecCore)' == 'true'">
-    <ProjectReference Include="$(TecCoreProjectPath)" />
+    <PackageReference Include="TEC.Core" Version="0.0.1-preview.5" />
   </ItemGroup>
   <ItemGroup Condition="'$(UseLocalTecCore)' != 'true'">
     <PackageReference Include="TEC.Core" Version="0.0.1" />
